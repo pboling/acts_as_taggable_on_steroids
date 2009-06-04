@@ -12,3 +12,10 @@ question:
   
 animal:
   name: Crazy animal
+
+fantastic:
+  name: Fantastic
+
+awesome:
+  name: Awesome
+  canonical_tag: fantastic

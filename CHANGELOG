@@ -1,50 +1,56 @@
-[3 Jun 09]
+[5 Jun 2009]
+
+* Canonical tags are now working.
+
+* Fixtures have been upgraded for Rails 2.x
+
+[3 Jun 2009]
 
 * Upgrade tests for Rails 2.3
 
-[18 Mar 09]
+[18 Mar 2009]
 
 * Change callbacks used to save tags.
 
-[18 Feb 09]
+[18 Feb 2009]
 
 * Greatly improve speed when using find_tagged_with and :match_all [notonthehighstreet.com].
 
-[17 Sep 08]
+[17 Sep 2008]
 
 * Sanitize scope conditions in find_options_for_tag_counts [Rémy-Christophe Schermesser]
 
-[23 Aug 08]
+[23 Aug 2008]
 
 * Fix tag_counts instance method when no tags are present.
 
 * Make tag_counts instance_method merge any :conditions passed to it.
 
-[30 Mar 08]
+[30 Mar 2008]
 
 * Make TagList.from accept array arguments.
 
-[29 Mar 08]
+[29 Mar 2008]
 
 * Improve parsing of quotes inside tags [Arturas Slajus].
 
 * Add Tag.counts method.
 
-[28 Mar 08]
+[28 Mar 2008]
 
 * Make Tag#taggings :dependent => :destroy.
 
-[27 Mar 08]
+[27 Mar 2008]
 
 * Fix documentation for tag_counts.
 
-[18 Mar 08]
+[18 Mar 2008]
 
 * Add TagList#toggle [Pete Yandell].
 
 # Add find_related_tags method [Austin Foncaier].
 
-[30 Jan 08]
+[30 Jan 2008]
 
 * Fix Tag.destroy_unused on Rails 2.0.
 

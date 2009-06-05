@@ -52,7 +52,16 @@ class Tag < ActiveRecord::Base
     def options_for_counts(options = {})
       options.assert_valid_keys :start_at, :end_at, :conditions, :at_least, :at_most, :order, :limit, :joins
       options = options.dup
-      
+
+      # Define aliases for tables:
+      # used_tags is for the tag which the users used. Can be canonical or not.
+      # We simply use the table name here because it's the primary target of
+      # the query, and our users are probably expecting that (e.g. in SQL
+      # condition fragments which they pass as parameter)
+      used_tags_alias = Tag.table_name
+      # canonical_tags refers to the corresponding canonical tag
+      canonical_tags_alias = "canonical_#{Tag.table_name}"
+
       start_at = sanitize_sql(["#{Tagging.table_name}.created_at >= ?", options.delete(:start_at)]) if options[:start_at]
       end_at = sanitize_sql(["#{Tagging.table_name}.created_at <= ?", options.delete(:end_at)]) if options[:end_at]
       
@@ -66,24 +75,100 @@ class Tag < ActiveRecord::Base
       
       conditions = conditions.any? ? '(' + conditions.join(') AND (') + ')' : nil
       
-      joins = ["INNER JOIN #{Tagging.table_name} ON all_tags.id = #{Tagging.table_name}.tag_id",
-               "INNER JOIN #{Tag.table_name} AS canonical_tags ON COALESCE(all_tags.canonical_tag_id, all_tags.id) = canonical_tags.id" ]
-      
+      joins = [
+        "INNER JOIN #{Tagging.table_name}
+          ON #{used_tags_alias}.id = #{Tagging.table_name}.tag_id",
+        "INNER JOIN #{Tag.table_name} AS #{canonical_tags_alias}
+          ON COALESCE(#{used_tags_alias}.canonical_tag_id, #{used_tags_alias}.id) = #{canonical_tags_alias}.id"
+      ]
       joins << options.delete(:joins) if options[:joins]
 
       at_least  = sanitize_sql(['count >= ?', options.delete(:at_least)]) if options[:at_least]
       at_most   = sanitize_sql(['count <= ?', options.delete(:at_most)]) if options[:at_most]
       having    = [at_least, at_most].compact.join(' AND ')
-      group_by  = "canonical_tags.id HAVING count > 0"
+      group_by  = "#{canonical_tags_alias}.id HAVING count > 0"
       group_by << " AND #{having}" unless having.blank?
       
-      { :select     => "canonical_tags.*, COUNT(*) AS count",
-        :from       => "#{Tag.table_name} AS all_tags",
+      { :select     => "#{canonical_tags_alias}.*, COUNT(*) AS count",
+        :from       => "#{Tag.table_name} AS #{used_tags_alias}",
         :joins      => joins.join(" "),
         :conditions => conditions,
         :group      => group_by
       }.update(options)
     end
+
+    # Returns an array of tags corresponding to the parameters
+    # parameters can be:
+    #   * A string of comma-separated tags
+    #   * An array of tags, strings or a mixture of both
+    def find_from(tags)
+      result = []
+
+      # Create a tag list from the parameter. If the parameter already contains
+      # tag objects, sort them out.
+      case tags
+      when Array
+        result, not_tags = tags.partition { |t| t.is_a?(Tag) and not t.new_record? }
+        not_tags.map!(&:to_s)
+        tags = TagList.from(not_tags)
+      when Tag
+        return [ tags ]
+      else
+        tags = TagList.from(tags)
+      end
+
+      return result if tags.empty?
+
+      tags_result = find(:all, :conditions => tags_condition(tags))
+      return result + tags_result
+    end
+
+    # Same as find_from, but returns the corresponding canonical tags
+    def find_canonical_from(tags)
+      result = []
+
+      # Create a tag list from the parameter. If the parameter already contains
+      # tag objects, sort them out.
+      case tags
+      when Array
+        result, not_canonical_tags = tags.partition { |t| t.is_a?(Tag) and not t.new_record? and t.canonical? }
+        not_canonical_tags.map!(&:to_s)
+        tags = TagList.from(not_canonical_tags)
+      when Tag
+        if tags.canonical?
+          return [ tags ]
+        else
+          tags = [ tags ]
+        end
+      else
+        tags = TagList.from(tags)
+      end
+
+      return result if tags.empty?
+
+      canonical_alias = "canonical_#{table_name}"
+      select = "#{canonical_alias}.*"
+      join = "INNER JOIN #{table_name} AS #{canonical_alias}
+        ON COALESCE(#{table_name}.canonical_tag_id, #{table_name}.id) = #{canonical_alias}.id"
+      
+      tags_result = find(:all,
+                         :select => select,
+                         :joins => join,
+                         :conditions => tags_condition(tags))
+      return result + tags_result
+    end
+
+    protected
+
+    # Returns an SQL fragment which keeps only records found in +tags+, where
+    # +tags+ is an array of strings.
+    def tags_condition(tags)
+      condition = tags.map do |t|
+        sanitize_sql(["#{table_name}.name LIKE ?", t])
+      end.join(" OR ")
+      "(" + condition + ")" unless condition.blank?
+    end
+
   end
 
   protected
@@ -108,4 +193,5 @@ class Tag < ActiveRecord::Base
 
     self.canonical_tag = last
   end
+
 end

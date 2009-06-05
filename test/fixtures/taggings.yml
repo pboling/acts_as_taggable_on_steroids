@@ -59,6 +59,11 @@ sam_spring_awesome:
   taggable: sam_spring (Post)
   created_at: 2006-08-11
 
+sam_spring_good:
+  tag: good
+  taggable: sam_spring (Post)
+  created_at: 2006-08-11
+
 sam_summer_fantastic:
   tag: fantastic
   taggable: sam_summer (Post)

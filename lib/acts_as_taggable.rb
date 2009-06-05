@@ -9,6 +9,20 @@ module ActiveRecord #:nodoc:
         def acts_as_taggable
           has_many :taggings, :as => :taggable, :dependent => :destroy, :include => :tag
           has_many :tags, :through => :taggings
+          has_many :canonical_tags, :class_name => 'Tag',
+            :finder_sql => '
+              SELECT DISTINCT canonical_tags.* FROM #{Tag.table_name}
+              INNER JOIN #{Tag.table_name} AS canonical_tags
+                ON COALESCE(#{Tag.table_name}.canonical_tag_id, #{Tag.table_name}.id) = canonical_tags.id
+              INNER JOIN #{Tagging.table_name} ON #{Tag.table_name}.id = #{Tagging.table_name}.tag_id
+                AND #{Tagging.table_name}.taggable_id = #{id}
+                AND #{Tagging.table_name}.taggable_type = #{quote_value(self.class.base_class.name)}',
+            :counter_sql => '
+              SELECT COUNT(DISTINCT COALESCE(#{Tag.table_name}.canonical_tag_id, #{Tag.table_name}.id))
+              FROM #{Tag.table_name}
+              INNER JOIN #{Tagging.table_name} ON #{Tag.table_name}.id = #{Tagging.table_name}.tag_id
+                AND #{Tagging.table_name}.taggable_id = #{id}
+                AND #{Tagging.table_name}.taggable_type = #{quote_value(self.class.base_class.name)}'
           
           before_save :save_cached_tag_list
           
@@ -35,26 +49,52 @@ module ActiveRecord #:nodoc:
         # Related tags are all the other tags that are found on the models tagged with the provided tags.
         # 
         # Pass either a tag, string, or an array of strings or tags.
-        # 
+        #
         # Options:
-        #   :order - SQL Order how to order the tags. Defaults to "count DESC, tags.name".
+        #   same as Tag::counts
         def find_related_tags(tags, options = {})
-          tags = tags.is_a?(Array) ? TagList.new(tags.map(&:to_s)) : TagList.from(tags)
-          
-          related_models = find_tagged_with(tags)
-          
-          return [] if related_models.blank?
-          
-          related_ids = related_models.to_s(:db)
-          
-          Tag.find(:all, options.merge({
-            :select => "#{Tag.table_name}.*, COUNT(#{Tag.table_name}.id) AS count",
-            :joins  => "JOIN #{Tagging.table_name} ON #{Tagging.table_name}.taggable_type = '#{base_class.name}'
-              AND  #{Tagging.table_name}.taggable_id IN (#{related_ids})
-              AND  #{Tagging.table_name}.tag_id = #{Tag.table_name}.id",
-            :order => options[:order] || "count DESC, #{Tag.table_name}.name",
-            :group => "#{Tag.table_name}.id, #{Tag.table_name}.name HAVING #{Tag.table_name}.name NOT IN (#{tags.map { |n| quote_value(n) }.join(",")})"
-          }))
+
+          # First, we get the canonical tags corresponding to our parameters
+          tags = Tag.find_canonical_from(tags)
+          return [] if tags.empty?
+          tag_ids = '(' + tags.map { |t| t.id.to_s }.join(', ') + ')'
+
+          options = options.dup
+
+          # Let's call the tags passed to this function "source tags"
+          source_tag_alias = "source_#{Tag.table_name}"
+          source_tagging_alias = "source_#{Tagging.table_name}"
+
+          # Basically, this is a restricted version of Tag::counts. We just
+          # have to join from source tags to models and back to tags, and add a
+          # filter condition to get only the source tags we want.
+          #
+          # Finally, the specification of this function requires us to filter
+          # out the tags which are passed as parameters, which adds another
+          # condition.
+
+          joins = []
+          joins << options.delete(:joins) if options[:joins]
+          # Join tags to the model
+          joins << "
+            INNER JOIN #{table_name}
+              ON #{Tagging.table_name}.taggable_id = #{table_name}.id
+              AND #{Tagging.table_name}.taggable_type = #{quote_value(base_class.name)}"
+          # Join the source tags to the model as well
+          joins << "
+            INNER JOIN #{Tagging.table_name} AS #{source_tagging_alias}
+              ON #{source_tagging_alias}.taggable_id = #{table_name}.id
+              AND #{source_tagging_alias}.taggable_type = #{quote_value(base_class.name)}"
+          joins << "
+            INNER JOIN #{Tag.table_name} AS #{source_tag_alias}
+              ON #{source_tag_alias}.id = #{source_tagging_alias}.tag_id"
+
+          conditions = []
+          conditions << sanitize_sql_for_conditions(options.delete(:conditions)) if options[:conditions]
+          conditions << tags_condition(tags, source_tag_alias)
+          conditions << "canonical_#{Tag.table_name}.id NOT IN #{tag_ids}"
+
+          return Tag.counts(options.merge(:joins => joins.join(' '), :conditions => conditions.join(' AND ')))
         end
         
         # Pass either a tag, string, or an array of strings or tags.
@@ -69,34 +109,37 @@ module ActiveRecord #:nodoc:
         end
         
         def find_options_for_find_tagged_with(tags, options = {})
-          tags = tags.is_a?(Array) ? TagList.new(tags.map(&:to_s)) : TagList.from(tags)
-          options = options.dup
-          
+          # First, we get the canonical tags corresponding to our parameters
+          tags = Tag.find_canonical_from(tags)
           return {} if tags.empty?
+ 
+          options = options.dup
           
           conditions = []
           conditions << sanitize_sql(options.delete(:conditions)) if options[:conditions]
           
-          taggings_alias, tags_alias = "#{table_name}_taggings", "#{table_name}_tags"
+          # Define aliases:
+          taggings_alias       = "#{table_name}_#{Tagging.table_name}"
+          tags_alias           = "#{table_name}_#{Tag.table_name}"
           
-          joins = [
-            "INNER JOIN #{Tagging.table_name} #{taggings_alias} ON #{taggings_alias}.taggable_id = #{table_name}.#{primary_key} AND #{taggings_alias}.taggable_type = #{quote_value(base_class.name)}",
-            "INNER JOIN #{Tag.table_name} #{tags_alias} ON #{tags_alias}.id = #{taggings_alias}.tag_id"
-          ]
-          
-          if options.delete(:exclude)
-            conditions << <<-END
-              #{table_name}.id NOT IN
-                (SELECT #{Tagging.table_name}.taggable_id FROM #{Tagging.table_name}
-                 INNER JOIN #{Tag.table_name} ON #{Tagging.table_name}.tag_id = #{Tag.table_name}.id
-                 WHERE #{tags_condition(tags)} AND #{Tagging.table_name}.taggable_type = #{quote_value(base_class.name)})
+          joins = []
+          if options[:match_all]
+            joins << joins_for_match_all_tags(tags)
+          elsif not options[:exclude]
+            joins << <<-END
+              INNER JOIN #{Tagging.table_name} AS #{taggings_alias}
+                ON #{taggings_alias}.taggable_id = #{table_name}.#{primary_key}
+                AND #{taggings_alias}.taggable_type = #{quote_value(base_class.name)}
+
+              INNER JOIN #{Tag.table_name} AS #{tags_alias}
+                ON #{tags_alias}.id = #{taggings_alias}.tag_id
             END
-          else
-            if options.delete(:match_all)
-              joins << joins_for_match_all_tags(tags)
-            else
-              conditions << tags_condition(tags, tags_alias)
-            end
+          end
+
+          if options.delete(:exclude)
+            conditions << tags_condition_for_exclude(tags)
+          elsif not options.delete(:match_all)
+            conditions << tags_condition(tags, tags_alias)
           end
           
           { :select => "DISTINCT #{table_name}.*",
@@ -105,23 +148,28 @@ module ActiveRecord #:nodoc:
           }.reverse_merge!(options)
         end
         
+        # When we need to match all tags, there will be one set of joins per
+        # tag. This function returns SQL code for the joins. Use it together
+        # with +tags_conditions_for_match_all_tags+.
+        # +tags+ needs to be an array of canonical tags.
         def joins_for_match_all_tags(tags)
           joins = []
           
           tags.each_with_index do |tag, index|
-            taggings_alias, tags_alias = "taggings_#{index}", "tags_#{index}"
+            taggings_alias       = "#{Tagging.table_name}_#{index}"
+            tags_alias           = "#{Tag.table_name}_#{index}"
 
             join = <<-END
-              INNER JOIN #{Tagging.table_name} #{taggings_alias} ON
+              INNER JOIN #{Tagging.table_name} AS #{taggings_alias} ON
                 #{taggings_alias}.taggable_id = #{table_name}.#{primary_key} AND
                 #{taggings_alias}.taggable_type = #{quote_value(base_class.name)}
 
-              INNER JOIN #{Tag.table_name} #{tags_alias} ON
+              INNER JOIN #{Tag.table_name} AS #{tags_alias} ON
                 #{taggings_alias}.tag_id = #{tags_alias}.id AND
-                #{tags_alias}.name = ?
+                (COALESCE(#{tags_alias}.canonical_tag_id, #{tags_alias}.id) = ?)
             END
 
-            joins << sanitize_sql([join, tag])
+            joins << sanitize_sql([join, tag.id])
           end
           
           joins.join(" ")
@@ -139,8 +187,8 @@ module ActiveRecord #:nodoc:
           scope = scope(:find)
           
           conditions = []
-          conditions << send(:sanitize_conditions, options.delete(:conditions)) if options[:conditions]
-          conditions << send(:sanitize_conditions, scope[:conditions]) if scope && scope[:conditions]
+          conditions << sanitize_sql(options.delete(:conditions)) if options[:conditions]
+          conditions << sanitize_sql(scope[:conditions]) if scope && scope[:conditions]
           conditions << "#{Tagging.table_name}.taggable_type = #{quote_value(base_class.name)}"
           conditions << type_condition unless descends_from_active_record? 
           conditions.compact!
@@ -160,13 +208,29 @@ module ActiveRecord #:nodoc:
           column_names.include?(cached_tag_list_column_name)
         end
         
-       private
-        def tags_condition(tags, table_name = Tag.table_name)
-          condition = tags.map { |t| sanitize_sql(["#{table_name}.name LIKE ?", t]) }.join(" OR ")
-          "(" + condition + ")" unless condition.blank?
+      private
+        # Returns an SQL fragment which tests that at least one tag from +tags+
+        # matches the current record. +tags+ has to be an array of canonical tags.
+        def tags_condition(tags, tags_alias)
+          return if tags.empty?
+          tag_ids = '(' + tags.map { |t| t.id.to_s }.join(', ') + ')'
+
+          return "COALESCE(#{tags_alias}.canonical_tag_id, #{tags_alias}.id) IN #{tag_ids}"
+        end
+
+        # Returns an SQL fragment which tests that no tag from +tags+ matches the current record
+        def tags_condition_for_exclude(tags)
+          used_alias = "used_#{Tag.table_name}"
+          return "
+            #{table_name}.id NOT IN
+              (SELECT #{Tagging.table_name}.taggable_id FROM #{Tagging.table_name}
+               INNER JOIN #{Tag.table_name} AS #{used_alias}
+                 ON #{Tagging.table_name}.tag_id = #{used_alias}.id
+               WHERE #{tags_condition(tags, used_alias)} AND #{Tagging.table_name}.taggable_type = #{quote_value(base_class.name)})
+          "
         end
       end
-      
+
       module InstanceMethods
         def tag_list
           return @tag_list if @tag_list
@@ -212,9 +276,14 @@ module ActiveRecord #:nodoc:
         #
         # The possible options are the same as the tag_counts class method.
         def tag_counts(options = {})
-          return [] if tag_list.blank?
+          return [] if canonical_tag_ids.blank?
           
-          options[:conditions] = self.class.send(:merge_conditions, options[:conditions], self.class.send(:tags_condition, tag_list))
+          ids_to_find = '(' + canonical_tag_ids.map(&:to_s).join(', ') + ')'
+          tag_condition = "canonical_#{Tag.table_name}.id IN #{ids_to_find}"          
+
+          options[:conditions] = self.class.send(:merge_conditions,
+                                                 options[:conditions],
+                                                 tag_condition)
           self.class.tag_counts(options)
         end
         

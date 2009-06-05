@@ -12,11 +12,20 @@ class TagsHelperTest < ActiveSupport::TestCase
       cloud_elements << [tag, css_class]
     end
     
-    assert cloud_elements.include?([tags(:good), "css2"])
-    assert cloud_elements.include?([tags(:bad), "css1"])
+    # What we should get:
+    # Tag       | Count | Fraction | 3*Fraction | CSS Class
+    # Nature    |     7 |    1.000 |      3.000 | css4
+    # Very good |     3 |    0.428 |      1.286 | css2
+    # Fantastic |     2 |    0.285 |      0.857 | css2
+    # Question  |     1 |    0.143 |      0.428 | css1
+    # Bad       |     1 |    0.143 |      0.428 | css1
+
+    assert_equal 5, cloud_elements.size
     assert cloud_elements.include?([tags(:nature), "css4"])
+    assert cloud_elements.include?([tags(:good), "css2"])
+    assert cloud_elements.include?([tags(:fantastic), "css2"])
     assert cloud_elements.include?([tags(:question), "css1"])
-    assert_equal 4, cloud_elements.size
+    assert cloud_elements.include?([tags(:bad), "css1"])
   end
   
   def test_tag_cloud_when_no_tags

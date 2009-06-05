@@ -28,7 +28,7 @@ sam_flowers:
 
 sam_spring:
   user: sam
-  text: I like spring, the blossoming trees are awesome.
+  text: I like spring, the blossoming trees are awesome and the weather feels good.
 
 sam_summer:
   user: sam

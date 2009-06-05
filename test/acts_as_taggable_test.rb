@@ -3,11 +3,11 @@ require File.dirname(__FILE__) + '/abstract_unit'
 class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   fixtures :tags, :taggings, :posts, :users, :photos, :subscriptions, :magazines
 
-  def test_find_related_tags_with
+  def test_find_related_tags
     assert_equivalent [tags(:good), tags(:bad), tags(:question)], Post.find_related_tags("nature")
-    assert_equivalent [tags(:nature)], Post.find_related_tags([tags(:good)])
-    assert_equivalent [tags(:bad), tags(:question)], Post.find_related_tags(["Very Good", "Nature"])        
-    assert_equivalent [tags(:bad), tags(:question)], Post.find_related_tags([tags(:good), tags(:nature)])
+    assert_equivalent [tags(:nature), tags(:fantastic)], Post.find_related_tags([tags(:good)])
+    assert_equivalent [tags(:bad), tags(:question), tags(:fantastic)], Post.find_related_tags(["Very Good", "Nature"])
+    assert_equivalent [tags(:bad), tags(:question), tags(:fantastic)], Post.find_related_tags([tags(:good), tags(:nature)])
   end
   
   def test_find_tagged_with_include_and_order
@@ -25,7 +25,7 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   end
     
   def test_find_tagged_with
-    assert_equivalent [posts(:jonathan_sky), posts(:sam_flowers)], Post.find_tagged_with('"Very good"')
+    assert_equivalent [posts(:jonathan_sky), posts(:sam_flowers), posts(:sam_spring)], Post.find_tagged_with('"Very good"')
     assert_equal Post.find_tagged_with('"Very good"'), Post.find_tagged_with(['Very good'])
     assert_equal Post.find_tagged_with('"Very good"'), Post.find_tagged_with([tags(:good)])
     
@@ -59,6 +59,18 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   
   def test_find_tagged_with_conditions
     assert_equal [], Post.find_tagged_with('"Very good", Nature', :conditions => '1=0')
+    assert_equal [posts(:jonathan_sky)], Post.find_tagged_with('"Very good", Nature', :match_all => true,
+      :conditions => "posts.user_id = #{users(:jonathan).id}")
+  end
+  
+  def test_find_tagged_with_array_conditions
+    assert_equal [posts(:jonathan_sky)], Post.find_tagged_with('"Very good", Nature', :match_all => true,
+      :conditions => ["posts.user_id = ?", users(:jonathan).id])
+  end
+  
+  def test_find_tagged_with_hash_conditions
+    assert_equal [posts(:jonathan_sky)], Post.find_tagged_with('"Very good", Nature', :match_all => true,
+      :conditions => { :posts => {:user_id => users(:jonathan).id} })
   end
   
   def test_find_tagged_with_duplicates_options_hash
@@ -68,7 +80,7 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   
   def test_find_tagged_with_exclusions
     assert_equivalent [photos(:jonathan_questioning_dog), photos(:jonathan_bad_cat)], Photo.find_tagged_with("Nature", :exclude => true)
-    assert_equivalent [posts(:jonathan_grass), posts(:jonathan_rain), posts(:jonathan_cloudy), posts(:jonathan_still_cloudy)], Post.find_tagged_with("'Very good', Bad", :exclude => true)
+    assert_equivalent [posts(:jonathan_grass), posts(:jonathan_rain), posts(:jonathan_cloudy), posts(:jonathan_still_cloudy), posts(:sam_summer)], Post.find_tagged_with("'Very good', Bad", :exclude => true)
   end
   
   def test_find_options_for_find_tagged_with_no_tags_returns_empty_hash
@@ -83,10 +95,12 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   end
   
   def test_find_options_for_find_tagged_with_respects_custom_table_name
+    good = tags(:good)
+
     Tagging.table_name = "categorisations"
     Tag.table_name = "categories"
     
-    options = Photo.find_options_for_find_tagged_with("Hello")
+    options = Photo.find_options_for_find_tagged_with(good)
     
     assert_no_match(/ taggings /, options[:joins])
     assert_no_match(/ tags /, options[:joins])
@@ -106,12 +120,12 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   end
   
   def test_basic_tag_counts_on_class
-    assert_tag_counts Post.tag_counts, :good => 2, :nature => 7, :question => 1, :bad => 1
+    assert_tag_counts Post.tag_counts, :good => 3, :nature => 7, :question => 1, :bad => 1, :fantastic => 2
     assert_tag_counts Photo.tag_counts, :good => 1, :nature => 3, :question => 1, :bad => 1, :animal => 3
   end
   
   def test_tag_counts_on_class_with_date_conditions
-    assert_tag_counts Post.tag_counts(:start_at => Date.new(2006, 8, 4)), :good => 1, :nature => 5, :question => 1, :bad => 1
+    assert_tag_counts Post.tag_counts(:start_at => Date.new(2006, 8, 4)), :good => 2, :nature => 5, :question => 1, :bad => 1, :fantastic => 2
     assert_tag_counts Post.tag_counts(:end_at => Date.new(2006, 8, 6)), :good => 1, :nature => 4, :question => 1
     assert_tag_counts Post.tag_counts(:start_at => Date.new(2006, 8, 5), :end_at => Date.new(2006, 8, 10)), :good => 1, :nature => 4, :bad => 1
     
@@ -125,6 +139,7 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   
   def test_tag_counts_on_class_with_frequencies_and_conditions
     assert_tag_counts Photo.tag_counts(:at_least => 2, :conditions => '1=1'), :nature => 3, :animal => 3
+    assert_tag_counts Photo.tag_counts(:at_least => 2, :conditions => '1=0'), {}
   end
   
   def test_tag_counts_duplicates_options_hash
@@ -143,7 +158,7 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   
   def test_tag_counts_on_association
     assert_tag_counts users(:jonathan).posts.tag_counts, :good => 1, :nature => 5, :question => 1
-    assert_tag_counts users(:sam).posts.tag_counts, :good => 1, :nature => 2, :bad => 1
+    assert_tag_counts users(:sam).posts.tag_counts, :good => 2, :nature => 2, :bad => 1, :fantastic => 2
     
     assert_tag_counts users(:jonathan).photos.tag_counts, :animal => 3, :nature => 1, :question => 1, :bad => 1
     assert_tag_counts users(:sam).photos.tag_counts, :nature => 2, :good => 1
@@ -185,11 +200,11 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
     options = Photo.find_options_for_tag_counts(:start_at => 2.weeks.ago, :end_at => Date.today)
     sql = options.values.join(' ')
     
-    assert_no_match /taggings/, sql
-    assert_no_match /tags/, sql
+    assert_no_match /\btaggings\b/, sql
+    assert_no_match /\btags\b/, sql
     
-    assert_match /categorisations/, sql
-    assert_match /categories/, sql
+    assert_match /\bcategorisations\b/, sql
+    assert_match /\bcategories\b/, sql
   ensure
     Tagging.table_name = "taggings"
     Tag.table_name = "tags"
@@ -282,7 +297,7 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   end
   
   def test_instance_tag_counts
-    assert_tag_counts posts(:jonathan_sky).tag_counts, :good => 2, :nature => 7
+    assert_tag_counts posts(:jonathan_sky).tag_counts, :good => 3, :nature => 7
   end
   
   def test_tag_list_populated_when_cache_nil

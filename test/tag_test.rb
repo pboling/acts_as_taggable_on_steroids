@@ -17,7 +17,7 @@ class TagTest < ActiveSupport::TestCase
   end
   
   def test_taggings
-    assert_equivalent [taggings(:jonathan_sky_good), taggings(:sam_flowers_good), taggings(:sam_flower_good), taggings(:ruby_good)], tags(:good).taggings
+    assert_equivalent [taggings(:jonathan_sky_good), taggings(:sam_flowers_good), taggings(:sam_spring_good), taggings(:sam_flower_good), taggings(:ruby_good)], tags(:good).taggings
     assert_equivalent [taggings(:sam_ground_bad), taggings(:jonathan_bad_cat_bad)], tags(:bad).taggings
   end
   
@@ -39,7 +39,7 @@ class TagTest < ActiveSupport::TestCase
   end
   
   def test_all_counts
-    assert_tag_counts Tag.counts, :good => 4, :bad => 2, :nature => 10, :question => 2, :animal => 3
+    assert_tag_counts Tag.counts, :good => 5, :bad => 2, :nature => 10, :question => 2, :animal => 3, :fantastic => 2
   end
 
   def test_all_counts_with_string_conditions
@@ -58,6 +58,39 @@ class TagTest < ActiveSupport::TestCase
         :created_at => (DateTime.parse('2006-08-14 23:59') .. DateTime.parse('4000-01-01'))
       }}),
       :question => 1, :bad => 1, :animal => 1, :nature => 2, :good => 2
+  end
+
+  def test_find_from
+    assert_equivalent tags(:good, :animal, :awesome), Tag.find_from("Very good, crazy animal, awesome")
+    assert_equivalent tags(:good, :animal, :awesome), Tag.find_from(["Very good", "crazy animal", "awesome"])
+    assert_equivalent tags(:good, :animal, :awesome), Tag.find_from(["Very good", tags(:animal), "awesome"])
+  end
+
+  def test_find_from_queries_db_only_when_required
+    tags_to_find = tags(:good, :animal)
+    assert_no_queries do
+      Tag.find_from(tags_to_find)
+    end
+  end
+
+  def test_find_canonical_from
+    assert_equivalent tags(:good, :animal, :fantastic), Tag.find_canonical_from("Very good, crazy animal, awesome")
+    assert_equivalent tags(:good, :animal, :fantastic), Tag.find_canonical_from("Very good, crazy animal, fantastic")
+    assert_equivalent tags(:good, :animal, :fantastic), Tag.find_canonical_from(["Very good", "crazy animal", "awesome"])
+    assert_equivalent tags(:good, :animal, :fantastic), Tag.find_canonical_from(["Very good", "crazy animal", "fantastic"])
+    assert_equivalent tags(:good, :animal, :fantastic), Tag.find_canonical_from(["Very good", tags(:animal), "awesome"])
+  end
+
+  def test_find_canonical_from_queries_db_only_when_required
+    tags_to_find = tags(:good, :fantastic)
+    assert_no_queries do
+      assert_equivalent tags(:good, :fantastic), Tag.find_canonical_from(tags_to_find)
+    end
+
+    tags_to_find = tags(:good, :awesome)
+    assert_queries do
+      assert_equivalent tags(:good, :fantastic), Tag.find_canonical_from(tags_to_find)
+    end
   end
 
 end

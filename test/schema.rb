@@ -1,7 +1,6 @@
 ActiveRecord::Schema.define :version => 0 do
   create_table :tags, :force => true do |t|
     t.column :name, :string
-    t.references :canonical_tag
   end
   
   create_table :taggings, :force => true do |t|

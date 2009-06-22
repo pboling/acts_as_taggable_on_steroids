@@ -25,11 +25,3 @@ sam_ground:
 sam_flowers:
   user: sam
   text: Why are the flowers dead?
-
-sam_spring:
-  user: sam
-  text: I like spring, the blossoming trees are awesome and the weather feels good.
-
-sam_summer:
-  user: sam
-  text: "I like summer, it's a fantastic season to go to the beach."

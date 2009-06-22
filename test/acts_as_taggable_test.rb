@@ -1,13 +1,11 @@
 require File.dirname(__FILE__) + '/abstract_unit'
 
 class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
-  fixtures :tags, :taggings, :posts, :users, :photos, :subscriptions, :magazines
-
   def test_find_related_tags
     assert_equivalent [tags(:good), tags(:bad), tags(:question)], Post.find_related_tags("nature")
-    assert_equivalent [tags(:nature), tags(:fantastic)], Post.find_related_tags([tags(:good)])
-    assert_equivalent [tags(:bad), tags(:question), tags(:fantastic)], Post.find_related_tags(["Very Good", "Nature"])
-    assert_equivalent [tags(:bad), tags(:question), tags(:fantastic)], Post.find_related_tags([tags(:good), tags(:nature)])
+    assert_equivalent [tags(:nature)], Post.find_related_tags([tags(:good)])
+    assert_equivalent [tags(:bad), tags(:question)], Post.find_related_tags(["Very Good", "Nature"])        
+    assert_equivalent [tags(:bad), tags(:question)], Post.find_related_tags([tags(:good), tags(:nature)])
   end
   
   def test_find_tagged_with_include_and_order
@@ -25,7 +23,7 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   end
     
   def test_find_tagged_with
-    assert_equivalent [posts(:jonathan_sky), posts(:sam_flowers), posts(:sam_spring)], Post.find_tagged_with('"Very good"')
+    assert_equivalent [posts(:jonathan_sky), posts(:sam_flowers)], Post.find_tagged_with('"Very good"')
     assert_equal Post.find_tagged_with('"Very good"'), Post.find_tagged_with(['Very good'])
     assert_equal Post.find_tagged_with('"Very good"'), Post.find_tagged_with([tags(:good)])
     
@@ -80,7 +78,7 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   
   def test_find_tagged_with_exclusions
     assert_equivalent [photos(:jonathan_questioning_dog), photos(:jonathan_bad_cat)], Photo.find_tagged_with("Nature", :exclude => true)
-    assert_equivalent [posts(:jonathan_grass), posts(:jonathan_rain), posts(:jonathan_cloudy), posts(:jonathan_still_cloudy), posts(:sam_summer)], Post.find_tagged_with("'Very good', Bad", :exclude => true)
+    assert_equivalent [posts(:jonathan_grass), posts(:jonathan_rain), posts(:jonathan_cloudy), posts(:jonathan_still_cloudy)], Post.find_tagged_with("'Very good', Bad", :exclude => true)
   end
   
   def test_find_options_for_find_tagged_with_no_tags_returns_empty_hash
@@ -120,12 +118,12 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   end
   
   def test_basic_tag_counts_on_class
-    assert_tag_counts Post.tag_counts, :good => 3, :nature => 7, :question => 1, :bad => 1, :fantastic => 2
+    assert_tag_counts Post.tag_counts, :good => 2, :nature => 7, :question => 1, :bad => 1
     assert_tag_counts Photo.tag_counts, :good => 1, :nature => 3, :question => 1, :bad => 1, :animal => 3
   end
   
   def test_tag_counts_on_class_with_date_conditions
-    assert_tag_counts Post.tag_counts(:start_at => Date.new(2006, 8, 4)), :good => 2, :nature => 5, :question => 1, :bad => 1, :fantastic => 2
+    assert_tag_counts Post.tag_counts(:start_at => Date.new(2006, 8, 4)), :good => 1, :nature => 5, :question => 1, :bad => 1
     assert_tag_counts Post.tag_counts(:end_at => Date.new(2006, 8, 6)), :good => 1, :nature => 4, :question => 1
     assert_tag_counts Post.tag_counts(:start_at => Date.new(2006, 8, 5), :end_at => Date.new(2006, 8, 10)), :good => 1, :nature => 4, :bad => 1
     
@@ -158,7 +156,7 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   
   def test_tag_counts_on_association
     assert_tag_counts users(:jonathan).posts.tag_counts, :good => 1, :nature => 5, :question => 1
-    assert_tag_counts users(:sam).posts.tag_counts, :good => 2, :nature => 2, :bad => 1, :fantastic => 2
+    assert_tag_counts users(:sam).posts.tag_counts, :good => 1, :nature => 2, :bad => 1
     
     assert_tag_counts users(:jonathan).photos.tag_counts, :animal => 3, :nature => 1, :question => 1, :bad => 1
     assert_tag_counts users(:sam).photos.tag_counts, :nature => 2, :good => 1
@@ -297,7 +295,7 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
   end
   
   def test_instance_tag_counts
-    assert_tag_counts posts(:jonathan_sky).tag_counts, :good => 3, :nature => 7
+    assert_tag_counts posts(:jonathan_sky).tag_counts, :good => 2, :nature => 7
   end
   
   def test_tag_list_populated_when_cache_nil
@@ -391,13 +389,12 @@ class ActsAsTaggableOnSteroidsTest < ActiveSupport::TestCase
 end
 
 class ActsAsTaggableOnSteroidsFormTest < ActiveSupport::TestCase
-  fixtures :tags, :taggings, :posts, :users, :photos
-  
   include ActionView::Helpers::FormHelper
   
   def test_tag_list_contents
     fields_for :post, posts(:jonathan_sky) do |f|
-      assert_match /Very good, Nature/, f.text_field(:tag_list)
+      assert_match /Nature/, f.text_field(:tag_list)
+      assert_match /Very good/, f.text_field(:tag_list)
     end
   end
 end

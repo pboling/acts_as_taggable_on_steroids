@@ -1,6 +1,16 @@
 class Tag < ActiveRecord::Base
   has_many :taggings, :dependent => :destroy
 
+  # Tag.restrict_taggable_type("MyKlass").find(:all)
+  # An action you could use to return auto-complete suggestions:
+  # class MyKlassController < ApplicationController
+  #   def tag_suggestions
+  #     @tags = Tag.restrict_taggable_type("MyKlass").find(:all, :conditions => ["name LIKE ?", "%#{params[:tag]}%"])
+  #     render :layout => false
+  #   end
+  # end
+  named_scope :restrict_taggable_type, lambda { |*args| { :include => [:taggings], :conditions => ["taggings.taggable_type = ?", args.first]}}
+
   validates_presence_of :name
   validates_uniqueness_of :name
   

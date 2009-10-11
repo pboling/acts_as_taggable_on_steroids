@@ -146,6 +146,52 @@ used to tag any objects. Defaults to false.
 
   Tag.destroy_unused = true
 
+=== Auto-Complete AJAX Tag Fields in 6 easy steps!
+
+  Assuming we want to tag our documents with auto-complete, this is how we do it.
+  (Assumes Prototype, but I'm sure it can be done in a similar fashion with 'pick your fav js lib')
+
+  # 1. Make the class taggable:
+  class Document < ActiveRecord::Base
+    acts_as_taggable
+    # rest of class...
+  end
+
+  # 2. Need a route for the auto-complete AJAX to query (in config/routes.rb):
+  map.resources :documents, :collection => { :tag_suggestions => :get }
+
+  # 3. Migration for the cached lag list (in db/migrate):
+  class CachedLagListDocuments < ActiveRecord::Migration
+    def self.up
+      add_column :documents, :cached_tag_list, :string, :default => nil
+    end
+    def self.down
+      remove_column :documents, :cached_tag_list
+    end
+  end
+
+  <!-- 4. The Form With Auto-Compelte Tag Field (in app/views/documents/new.html.erb)-->
+  <% form_for(:document, :url => documents_path, :html => { :multipart => true }) do |form| %>
+    <%= form.label(:tag_list, "Tag to categorize <strong>(separate by commas)</strong>") %><br/>
+    <%= text_field_with_auto_complete :document, :tag_list,
+                                      { :size => 40, :style => "width: 100%", :class => "bigger"},
+                                      { :url => tag_suggestions_documents_path(:format => :js), :method => :get, :tokens => ',' } %>
+    ... other fields ...
+  <% end %>
+
+  # 5. The action the auto-complete tag field on the form will query:
+  class DocumentsController < ApplicationController
+    protect_from_forgery :except => [:tag_suggestions]
+    def tag_suggestions
+      @tags = Tag.restrict_taggable_type("Document").find(:all, :conditions => ["name LIKE ?", "%#{params[:tag]}%"])
+      render :layout => false
+    end
+  end
+
+  # 6. The magic glue to pull it all together
+  # Create a file in app/views/documents called tag_suggestions.js.erb and put this one line in it:
+  <%= auto_complete_result @tags, :name %>
+
 === Other
 
 Problems, comments, and suggestions all welcome. jonathan.viney@gmail.com  
